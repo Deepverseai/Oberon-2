@@ -1,0 +1,6 @@
+{
+  "name": "Oberon Browser",
+  "description": "Sleek, fast, and privacy-first web browser with tab management, ad shielding, reader mode, and custom speed dial.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

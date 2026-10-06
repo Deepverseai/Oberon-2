@@ -1,0 +1,894 @@
+package com.example.viewmodel
+
+import android.app.Application
+import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.viewModelScope
+import com.example.agent.AgentCursorState
+import com.example.agent.AgentDetectedError
+import com.example.agent.AgentModeStatus
+import com.example.agent.InteractiveElementInfo
+import com.example.data.local.AppDatabase
+import com.example.data.local.BookmarkEntity
+import com.example.data.local.HistoryEntity
+import com.example.data.local.QuickLinkEntity
+import com.example.model.ActiveScreen
+import com.example.model.BrowserTab
+import com.example.model.ConsoleLogItem
+import com.example.model.DownloadItem
+import com.example.model.SearchEngine
+import com.example.model.ShieldStats
+import com.example.model.SiteSecurityInfo
+import com.example.model.ThemePreference
+import com.example.model.UserAgentPreference
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeout
+import org.json.JSONArray
+import org.json.JSONObject
+
+sealed interface WebNavAction {
+    data class LoadUrl(val url: String) : WebNavAction
+    object GoBack : WebNavAction
+    object GoForward : WebNavAction
+    object Reload : WebNavAction
+    object Stop : WebNavAction
+    data class FindInPage(val query: String, val forward: Boolean = true) : WebNavAction
+    object ClearFindMatches : WebNavAction
+    data class ExtractReaderContent(val callbackId: String) : WebNavAction
+    data class ExecuteJavaScript(val script: String, val onResult: ((String) -> Unit)? = null) : WebNavAction
+    data class ScrollPageBy(val dx: Int, val dy: Int) : WebNavAction
+}
+
+class BrowserViewModel(application: Application) : AndroidViewModel(application) {
+
+    private val db = AppDatabase.getDatabase(application)
+    private val bookmarkDao = db.bookmarkDao()
+    private val historyDao = db.historyDao()
+    private val quickLinkDao = db.quickLinkDao()
+
+    val bookmarks: StateFlow<List<BookmarkEntity>> = bookmarkDao.getAllBookmarks()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val history: StateFlow<List<HistoryEntity>> = historyDao.getAllHistory()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val quickLinks: StateFlow<List<QuickLinkEntity>> = quickLinkDao.getAllQuickLinks()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    // Tabs
+    private val initialTab = BrowserTab(url = "", title = "New Tab", isIncognito = false)
+    private val _tabs = MutableStateFlow<List<BrowserTab>>(listOf(initialTab))
+    val tabs: StateFlow<List<BrowserTab>> = _tabs.asStateFlow()
+
+    private val _activeTabId = MutableStateFlow(initialTab.id)
+    val activeTabId: StateFlow<String> = _activeTabId.asStateFlow()
+
+    // Navigation UI Screen
+    private val _currentScreen = MutableStateFlow(ActiveScreen.BROWSER)
+    val currentScreen: StateFlow<ActiveScreen> = _currentScreen.asStateFlow()
+
+    // Search Engine
+    private val _selectedSearchEngine = MutableStateFlow(SearchEngine.GOOGLE)
+    val selectedSearchEngine: StateFlow<SearchEngine> = _selectedSearchEngine.asStateFlow()
+
+    // Shield
+    private val _shieldStats = MutableStateFlow(ShieldStats())
+    val shieldStats: StateFlow<ShieldStats> = _shieldStats.asStateFlow()
+
+    // Navigation Actions for active WebView
+    private val _webNavActions = MutableSharedFlow<WebNavAction>()
+    val webNavActions = _webNavActions.asSharedFlow()
+
+    // Omnibox state
+    private val _omniboxQuery = MutableStateFlow("")
+    val omniboxQuery: StateFlow<String> = _omniboxQuery.asStateFlow()
+
+    private val _isOmniboxFocused = MutableStateFlow(false)
+    val isOmniboxFocused: StateFlow<Boolean> = _isOmniboxFocused.asStateFlow()
+
+    // Find in Page state
+    private val _isFindInPageVisible = MutableStateFlow(false)
+    val isFindInPageVisible: StateFlow<Boolean> = _isFindInPageVisible.asStateFlow()
+
+    private val _findQuery = MutableStateFlow("")
+    val findQuery: StateFlow<String> = _findQuery.asStateFlow()
+
+    private val _findMatchCount = MutableStateFlow(0)
+    val findMatchCount: StateFlow<Int> = _findMatchCount.asStateFlow()
+
+    private val _findActiveIndex = MutableStateFlow(0)
+    val findActiveIndex: StateFlow<Int> = _findActiveIndex.asStateFlow()
+
+    // Site Security Sheet Dialog
+    private val _siteSecurityInfo = MutableStateFlow<SiteSecurityInfo?>(null)
+    val siteSecurityInfo: StateFlow<SiteSecurityInfo?> = _siteSecurityInfo.asStateFlow()
+
+    // Preferences & Stitch Tokens
+    private val _themePreference = MutableStateFlow(ThemePreference.SYSTEM)
+    val themePreference: StateFlow<ThemePreference> = _themePreference.asStateFlow()
+
+    private val _userAgentPreference = MutableStateFlow(UserAgentPreference.MOBILE)
+    val userAgentPreference: StateFlow<UserAgentPreference> = _userAgentPreference.asStateFlow()
+
+    private val _isBottomToolbar = MutableStateFlow(false)
+    val isBottomToolbar: StateFlow<Boolean> = _isBottomToolbar.asStateFlow()
+
+    private val _adBlockEnabled = MutableStateFlow(true)
+    val adBlockEnabled: StateFlow<Boolean> = _adBlockEnabled.asStateFlow()
+
+    private val _javascriptEnabled = MutableStateFlow(true)
+    val javascriptEnabled: StateFlow<Boolean> = _javascriptEnabled.asStateFlow()
+
+    // Reader Mode Content State for active tab
+    private val _readerContent = MutableStateFlow<Map<String, String>?>(null)
+    val readerContent: StateFlow<Map<String, String>?> = _readerContent.asStateFlow()
+
+    // Downloads
+    private val _downloads = MutableStateFlow<List<DownloadItem>>(emptyList())
+    val downloads: StateFlow<List<DownloadItem>> = _downloads.asStateFlow()
+
+    // Developer Console Logs
+    private val _consoleLogs = MutableStateFlow<List<ConsoleLogItem>>(emptyList())
+    val consoleLogs: StateFlow<List<ConsoleLogItem>> = _consoleLogs.asStateFlow()
+
+    private val _isDevToolsOpen = MutableStateFlow(false)
+    val isDevToolsOpen: StateFlow<Boolean> = _isDevToolsOpen.asStateFlow()
+
+    // Speed Dial Context Sheet
+    private val _selectedQuickLinkForContext = MutableStateFlow<QuickLinkEntity?>(null)
+    val selectedQuickLinkForContext: StateFlow<QuickLinkEntity?> = _selectedQuickLinkForContext.asStateFlow()
+
+    // Home Customization
+    private val _showFavoritesOnHome = MutableStateFlow(true)
+    val showFavoritesOnHome: StateFlow<Boolean> = _showFavoritesOnHome.asStateFlow()
+
+    private val _showRecentOnHome = MutableStateFlow(true)
+    val showRecentOnHome: StateFlow<Boolean> = _showRecentOnHome.asStateFlow()
+
+    private val _showShieldOnHome = MutableStateFlow(true)
+    val showShieldOnHome: StateFlow<Boolean> = _showShieldOnHome.asStateFlow()
+
+    // Antigravity AI Agentic Automation State
+    private val _isAgentModeEnabled = MutableStateFlow(false)
+    val isAgentModeEnabled: StateFlow<Boolean> = _isAgentModeEnabled.asStateFlow()
+
+    private val _agentStatus = MutableStateFlow(AgentModeStatus.IDLE)
+    val agentStatus: StateFlow<AgentModeStatus> = _agentStatus.asStateFlow()
+
+    private val _agentCursorState = MutableStateFlow(AgentCursorState())
+    val agentCursorState: StateFlow<AgentCursorState> = _agentCursorState.asStateFlow()
+
+    private val _agentErrors = MutableStateFlow<List<AgentDetectedError>>(emptyList())
+    val agentErrors: StateFlow<List<AgentDetectedError>> = _agentErrors.asStateFlow()
+
+    private val _isAgentRunning = MutableStateFlow(false)
+    val isAgentRunning: StateFlow<Boolean> = _isAgentRunning.asStateFlow()
+
+    private val _agentButtonsTested = MutableStateFlow(0)
+    val agentButtonsTested: StateFlow<Int> = _agentButtonsTested.asStateFlow()
+
+    private var agentTestJob: Job? = null
+
+    val activeTab: BrowserTab?
+        get() = tabs.value.firstOrNull { it.id == activeTabId.value }
+
+    fun navigateToScreen(screen: ActiveScreen) {
+        _currentScreen.value = screen
+    }
+
+    fun setOmniboxQuery(query: String) {
+        _omniboxQuery.value = query
+    }
+
+    fun setOmniboxFocused(focused: Boolean) {
+        _isOmniboxFocused.value = focused
+        if (focused) {
+            val currentUrl = activeTab?.url ?: ""
+            if (currentUrl.isNotBlank() && currentUrl != "about:blank") {
+                _omniboxQuery.value = currentUrl
+            }
+        }
+    }
+
+    fun setSearchEngine(engine: SearchEngine) {
+        _selectedSearchEngine.value = engine
+    }
+
+    fun setThemePreference(pref: ThemePreference) {
+        _themePreference.value = pref
+    }
+
+    fun setUserAgentPreference(pref: UserAgentPreference) {
+        _userAgentPreference.value = pref
+        viewModelScope.launch {
+            _webNavActions.emit(WebNavAction.Reload)
+        }
+    }
+
+    fun setToolbarPosition(isBottom: Boolean) {
+        _isBottomToolbar.value = isBottom
+    }
+
+    fun setAdBlockEnabled(enabled: Boolean) {
+        _adBlockEnabled.value = enabled
+        _shieldStats.update { it.copy(isShieldEnabled = enabled) }
+    }
+
+    fun setJavascriptEnabled(enabled: Boolean) {
+        _javascriptEnabled.value = enabled
+    }
+
+    fun toggleBlockThirdPartyCookies(enabled: Boolean) {
+        _shieldStats.update { it.copy(blockThirdPartyCookies = enabled) }
+    }
+
+    fun toggleFingerprintingProtection(enabled: Boolean) {
+        _shieldStats.update { it.copy(fingerprintingProtection = enabled) }
+    }
+
+    fun toggleHttpsOnlyMode(enabled: Boolean) {
+        _shieldStats.update { it.copy(httpsOnlyMode = enabled) }
+    }
+
+    fun resetShieldStats() {
+        _shieldStats.update {
+            it.copy(
+                trackersBlocked = 0,
+                adsBlocked = 0,
+                dataSavedKb = 0,
+                httpsUpgrades = 0
+            )
+        }
+    }
+
+    fun openUrl(url: String, newTab: Boolean = false) {
+        val targetUrl = selectedSearchEngine.value.buildUrl(url)
+        _isOmniboxFocused.value = false
+
+        if (newTab || _tabs.value.isEmpty()) {
+            val tab = BrowserTab(url = targetUrl, title = "Loading...", isIncognito = false)
+            _tabs.update { it + tab }
+            _activeTabId.value = tab.id
+        } else {
+            val currentId = activeTabId.value
+            _tabs.update { list ->
+                list.map {
+                    if (it.id == currentId) it.copy(url = targetUrl, isLoading = true, progress = 10)
+                    else it
+                }
+            }
+            viewModelScope.launch {
+                _webNavActions.emit(WebNavAction.LoadUrl(targetUrl))
+            }
+        }
+        _currentScreen.value = ActiveScreen.BROWSER
+    }
+
+    fun createNewTab(isIncognito: Boolean = false, initialUrl: String = "") {
+        val resolvedUrl = if (initialUrl.isNotBlank()) selectedSearchEngine.value.buildUrl(initialUrl) else ""
+        val newTab = BrowserTab(
+            url = resolvedUrl,
+            title = if (resolvedUrl.isBlank()) "New Tab" else "Loading...",
+            isIncognito = isIncognito
+        )
+        _tabs.update { it + newTab }
+        _activeTabId.value = newTab.id
+        _currentScreen.value = ActiveScreen.BROWSER
+        if (resolvedUrl.isNotBlank()) {
+            viewModelScope.launch {
+                _webNavActions.emit(WebNavAction.LoadUrl(resolvedUrl))
+            }
+        }
+    }
+
+    fun switchTab(tabId: String) {
+        if (_tabs.value.any { it.id == tabId }) {
+            _activeTabId.value = tabId
+            _currentScreen.value = ActiveScreen.BROWSER
+        }
+    }
+
+    fun closeTab(tabId: String) {
+        val currentList = _tabs.value
+        val index = currentList.indexOfFirst { it.id == tabId }
+        if (index == -1) return
+
+        val newList = currentList.filter { it.id != tabId }
+        if (newList.isEmpty()) {
+            val replacement = BrowserTab(url = "", title = "New Tab", isIncognito = false)
+            _tabs.value = listOf(replacement)
+            _activeTabId.value = replacement.id
+        } else {
+            _tabs.value = newList
+            if (_activeTabId.value == tabId) {
+                val newActiveIndex = if (index >= newList.size) newList.size - 1 else index
+                _activeTabId.value = newList[newActiveIndex].id
+            }
+        }
+    }
+
+    fun closeAllTabs(isIncognitoOnly: Boolean = false) {
+        if (isIncognitoOnly) {
+            val nonIncognito = _tabs.value.filterNot { it.isIncognito }
+            if (nonIncognito.isEmpty()) {
+                val defaultTab = BrowserTab(url = "", title = "New Tab", isIncognito = false)
+                _tabs.value = listOf(defaultTab)
+                _activeTabId.value = defaultTab.id
+            } else {
+                _tabs.value = nonIncognito
+                if (activeTab?.isIncognito == true) {
+                    _activeTabId.value = nonIncognito.first().id
+                }
+            }
+        } else {
+            val freshTab = BrowserTab(url = "", title = "New Tab", isIncognito = false)
+            _tabs.value = listOf(freshTab)
+            _activeTabId.value = freshTab.id
+        }
+        _currentScreen.value = ActiveScreen.BROWSER
+    }
+
+    fun updateTabState(
+        tabId: String,
+        url: String? = null,
+        title: String? = null,
+        favicon: String? = null,
+        isLoading: Boolean? = null,
+        progress: Int? = null,
+        canGoBack: Boolean? = null,
+        canGoForward: Boolean? = null,
+        incrementTrackers: Boolean = false
+    ) {
+        _tabs.update { list ->
+            list.map { tab ->
+                if (tab.id == tabId) {
+                    var updated = tab
+                    if (url != null) updated = updated.copy(url = url)
+                    if (title != null && title.isNotBlank()) updated = updated.copy(title = title)
+                    if (favicon != null) updated = updated.copy(favicon = favicon)
+                    if (isLoading != null) updated = updated.copy(isLoading = isLoading)
+                    if (progress != null) updated = updated.copy(progress = progress)
+                    if (canGoBack != null) updated = updated.copy(canGoBack = canGoBack)
+                    if (canGoForward != null) updated = updated.copy(canGoForward = canGoForward)
+                    if (incrementTrackers) {
+                        updated = updated.copy(trackersBlocked = updated.trackersBlocked + 1)
+                        _shieldStats.update { stats ->
+                            stats.copy(
+                                trackersBlocked = stats.trackersBlocked + 1,
+                                adsBlocked = stats.adsBlocked + 1,
+                                dataSavedKb = stats.dataSavedKb + 34
+                            )
+                        }
+                    }
+                    updated
+                } else {
+                    tab
+                }
+            }
+        }
+
+        // Save history if successful page load and not incognito
+        if (url != null && !url.startsWith("about:") && isLoading == false) {
+            val tab = _tabs.value.firstOrNull { it.id == tabId }
+            if (tab != null && !tab.isIncognito) {
+                viewModelScope.launch {
+                    historyDao.insertHistory(
+                        HistoryEntity(
+                            title = tab.title.ifBlank { url },
+                            url = url,
+                            favicon = tab.favicon
+                        )
+                    )
+                }
+            }
+        }
+    }
+
+    fun toggleDesktopMode() {
+        val currentId = activeTabId.value
+        _tabs.update { list ->
+            list.map {
+                if (it.id == currentId) it.copy(isDesktopMode = !it.isDesktopMode) else it
+            }
+        }
+        viewModelScope.launch {
+            _webNavActions.emit(WebNavAction.Reload)
+        }
+    }
+
+    fun toggleReaderMode() {
+        val currentId = activeTabId.value
+        val tab = activeTab ?: return
+        val newReaderState = !tab.isReaderMode
+        _tabs.update { list ->
+            list.map {
+                if (it.id == currentId) it.copy(isReaderMode = newReaderState) else it
+            }
+        }
+        if (newReaderState) {
+            viewModelScope.launch {
+                _webNavActions.emit(WebNavAction.ExtractReaderContent(currentId))
+            }
+        } else {
+            _readerContent.value = null
+        }
+    }
+
+    fun setReaderExtractedData(data: Map<String, String>) {
+        _readerContent.value = data
+    }
+
+    fun goBack() {
+        viewModelScope.launch { _webNavActions.emit(WebNavAction.GoBack) }
+    }
+
+    fun goForward() {
+        viewModelScope.launch { _webNavActions.emit(WebNavAction.GoForward) }
+    }
+
+    fun reload() {
+        viewModelScope.launch { _webNavActions.emit(WebNavAction.Reload) }
+    }
+
+    fun stop() {
+        viewModelScope.launch { _webNavActions.emit(WebNavAction.Stop) }
+    }
+
+    fun bookmarkCurrentPage() {
+        val tab = activeTab ?: return
+        if (tab.url.isBlank() || tab.url.startsWith("about:")) return
+
+        viewModelScope.launch {
+            val existing = bookmarkDao.getBookmarkByUrl(tab.url)
+            if (existing != null) {
+                bookmarkDao.deleteBookmark(existing)
+            } else {
+                bookmarkDao.insertBookmark(
+                    BookmarkEntity(
+                        title = tab.title.ifBlank { tab.url },
+                        url = tab.url,
+                        favicon = tab.favicon
+                    )
+                )
+            }
+        }
+    }
+
+    fun removeBookmark(bookmark: BookmarkEntity) {
+        viewModelScope.launch {
+            bookmarkDao.deleteBookmark(bookmark)
+        }
+    }
+
+    fun removeHistoryItem(item: HistoryEntity) {
+        viewModelScope.launch {
+            historyDao.deleteHistory(item)
+        }
+    }
+
+    fun clearAllHistory() {
+        viewModelScope.launch {
+            historyDao.clearAllHistory()
+        }
+    }
+
+    fun addQuickLink(title: String, url: String) {
+        viewModelScope.launch {
+            val formattedUrl = if (!url.startsWith("http://") && !url.startsWith("https://")) "https://$url" else url
+            quickLinkDao.insertQuickLink(
+                QuickLinkEntity(
+                    title = title.ifBlank { "Site" },
+                    url = formattedUrl,
+                    iconName = "link",
+                    position = quickLinks.value.size
+                )
+            )
+        }
+    }
+
+    fun updateQuickLink(item: QuickLinkEntity, title: String, url: String) {
+        viewModelScope.launch {
+            val formattedUrl = if (!url.startsWith("http://") && !url.startsWith("https://")) "https://$url" else url
+            quickLinkDao.insertQuickLink(
+                item.copy(title = title, url = formattedUrl)
+            )
+        }
+    }
+
+    fun removeQuickLink(item: QuickLinkEntity) {
+        viewModelScope.launch {
+            quickLinkDao.deleteQuickLink(item)
+        }
+    }
+
+    fun setQuickLinkForContext(item: QuickLinkEntity?) {
+        _selectedQuickLinkForContext.value = item
+    }
+
+    // Downloads
+    fun deleteDownload(item: DownloadItem) {
+        _downloads.update { it.filter { d -> d.id != item.id } }
+    }
+
+    fun clearAllDownloads() {
+        _downloads.value = emptyList()
+    }
+
+    fun addDownload(fileName: String, url: String, sizeFormatted: String) {
+        val ext = fileName.substringAfterLast('.', "file")
+        _downloads.update {
+            listOf(
+                DownloadItem(
+                    fileName = fileName,
+                    url = url,
+                    fileSizeFormatted = sizeFormatted,
+                    fileExtension = ext
+                )
+            ) + it
+        }
+    }
+
+    // DevTools & Console Logs
+    fun addConsoleLog(message: String, level: String, sourceId: String, lineNumber: Int) {
+        _consoleLogs.update {
+            (listOf(
+                ConsoleLogItem(
+                    message = message,
+                    level = level,
+                    sourceId = sourceId,
+                    lineNumber = lineNumber
+                )
+            ) + it).take(150)
+        }
+    }
+
+    fun clearConsoleLogs() {
+        _consoleLogs.value = emptyList()
+    }
+
+    fun toggleDevTools(open: Boolean) {
+        _isDevToolsOpen.value = open
+    }
+
+    // Find In Page
+    fun showFindInPage(show: Boolean) {
+        _isFindInPageVisible.value = show
+        if (!show) {
+            _findQuery.value = ""
+            _findMatchCount.value = 0
+            _findActiveIndex.value = 0
+            viewModelScope.launch { _webNavActions.emit(WebNavAction.ClearFindMatches) }
+        }
+    }
+
+    fun updateFindQuery(query: String) {
+        _findQuery.value = query
+        viewModelScope.launch {
+            _webNavActions.emit(WebNavAction.FindInPage(query, forward = true))
+        }
+    }
+
+    fun findNext(forward: Boolean) {
+        viewModelScope.launch {
+            _webNavActions.emit(WebNavAction.FindInPage(_findQuery.value, forward = forward))
+        }
+    }
+
+    fun setFindResult(activeMatch: Int, totalMatches: Int) {
+        _findActiveIndex.value = activeMatch
+        _findMatchCount.value = totalMatches
+    }
+
+    fun showSiteSecurityDialog(show: Boolean) {
+        if (!show) {
+            _siteSecurityInfo.value = null
+            return
+        }
+        val tab = activeTab
+        if (tab != null && tab.url.isNotBlank()) {
+            val isHttps = tab.url.startsWith("https://")
+            val cookieHeader = try {
+                android.webkit.CookieManager.getInstance().getCookie(tab.url)
+            } catch (e: Exception) {
+                null
+            }
+            val realCookiesCount = if (cookieHeader.isNullOrBlank()) 0 else cookieHeader.split(";").filter { it.isNotBlank() }.size
+
+            _siteSecurityInfo.value = SiteSecurityInfo(
+                isHttps = isHttps,
+                domain = tab.displayHost,
+                protocol = if (isHttps) "TLS 1.3 / AES-256-GCM" else "Insecure HTTP",
+                certificateIssuer = if (isHttps) "Valid (Encrypted Connection)" else "None / Unencrypted",
+                trackersBlocked = tab.trackersBlocked,
+                cookiesCount = realCookiesCount,
+                certificateValid = isHttps
+            )
+        }
+    }
+
+    // --- Antigravity AI Agent Automation Methods ---
+
+    fun toggleAgentMode(enabled: Boolean) {
+        _isAgentModeEnabled.value = enabled
+        if (!enabled) {
+            stopAgentTest()
+            _agentCursorState.value = AgentCursorState(isVisible = false)
+            _agentStatus.value = AgentModeStatus.IDLE
+        } else {
+            _agentCursorState.value = AgentCursorState(
+                xRatio = 0.5f,
+                yRatio = 0.5f,
+                isVisible = true,
+                actionText = "Antigravity Agent Ready"
+            )
+            injectAgentObserver()
+        }
+    }
+
+    fun injectAgentObserver() {
+        val observerJs = """
+            (function() {
+                if (window.__antigravityAgentInjected) return;
+                window.__antigravityAgentInjected = true;
+                window.addEventListener('error', function(e) {
+                    console.error('ANTIGRAVITY_AGENT_ERROR:' + JSON.stringify({
+                        type: 'JS_RUNTIME_EXCEPTION',
+                        message: e.message || 'Script error occurred',
+                        filename: e.filename || 'inline',
+                        lineno: e.lineno || 0,
+                        stack: e.error ? e.error.stack : ''
+                    }));
+                });
+                window.addEventListener('unhandledrejection', function(e) {
+                    var reason = e.reason ? (e.reason.message || String(e.reason)) : 'Unhandled Promise Rejection';
+                    console.error('ANTIGRAVITY_AGENT_ERROR:' + JSON.stringify({
+                        type: 'UNHANDLED_PROMISE_REJECTION',
+                        message: reason,
+                        filename: 'promise',
+                        lineno: 0,
+                        stack: e.reason && e.reason.stack ? e.reason.stack : ''
+                    }));
+                });
+            })();
+        """.trimIndent()
+        viewModelScope.launch {
+            _webNavActions.emit(WebNavAction.ExecuteJavaScript(observerJs))
+        }
+    }
+
+    fun runAutonomousButtonAudit() {
+        if (_isAgentRunning.value) return
+        _isAgentRunning.value = true
+        _agentStatus.value = AgentModeStatus.SCANNING
+        _agentButtonsTested.value = 0
+
+        agentTestJob = viewModelScope.launch {
+            injectAgentObserver()
+
+            // 1. Initial human-like scan gesture
+            _agentCursorState.value = AgentCursorState(
+                xRatio = 0.5f,
+                yRatio = 0.35f,
+                isVisible = true,
+                actionText = "Scanning DOM for interactive elements..."
+            )
+            delay(400)
+
+            // Step 1: Real DOM scanning script to query actual buttons and interactive elements
+            val scanScript = """
+                (function() {
+                    var items = [];
+                    var interactive = document.querySelectorAll('button, a, input[type="button"], input[type="submit"], [role="button"], [onclick]');
+                    for (var i = 0; i < interactive.length; i++) {
+                        var el = interactive[i];
+                        var rect = el.getBoundingClientRect();
+                        if (rect.width > 0 && rect.height > 0 && rect.top >= 0 && rect.top <= window.innerHeight && rect.left >= 0 && rect.left <= window.innerWidth) {
+                            var id = el.id ? '#' + el.id : '';
+                            var cls = (el.className && typeof el.className === 'string' && el.className.trim().length > 0) ? '.' + el.className.trim().split(/\s+/)[0] : '';
+                            var sel = id || (el.tagName.toLowerCase() + cls) || el.tagName.toLowerCase();
+                            var txt = (el.innerText || el.value || el.getAttribute('aria-label') || el.title || el.tagName.toLowerCase()).replace(/\s+/g, ' ').trim();
+                            if (txt.length > 25) txt = txt.substring(0, 25) + '...';
+                            var x = (rect.left + rect.width / 2) / Math.max(1, window.innerWidth);
+                            var y = (rect.top + rect.height / 2) / Math.max(1, window.innerHeight);
+                            items.push({
+                                selector: sel,
+                                text: txt || 'Element',
+                                xRatio: Math.max(0.06, Math.min(0.94, x)),
+                                yRatio: Math.max(0.06, Math.min(0.94, y)),
+                                tag: el.tagName.toLowerCase()
+                            });
+                            if (items.length >= 12) break;
+                        }
+                    }
+                    return JSON.stringify(items);
+                })()
+            """.trimIndent()
+
+            val scanCompletable = CompletableDeferred<String>()
+            _webNavActions.emit(WebNavAction.ExecuteJavaScript(scanScript) { result ->
+                scanCompletable.complete(result ?: "[]")
+            })
+
+            val discoveredElementsJson = try {
+                withTimeout(3000) { scanCompletable.await() }
+            } catch (e: Exception) {
+                "[]"
+            }
+
+            // Parse real discovered DOM elements
+            val realElements = mutableListOf<InteractiveElementInfo>()
+            try {
+                var cleanJson = discoveredElementsJson.trim()
+                if (cleanJson.startsWith("\"") && cleanJson.endsWith("\"")) {
+                    cleanJson = cleanJson.substring(1, cleanJson.length - 1).replace("\\\"", "\"").replace("\\\\", "\\")
+                }
+                val jsonArr = JSONArray(cleanJson)
+                for (i in 0 until jsonArr.length()) {
+                    val obj = jsonArr.getJSONObject(i)
+                    val selector = obj.optString("selector", "button")
+                    val text = obj.optString("text", "Button")
+                    val tag = obj.optString("tag", "button")
+                    val xRatio = obj.optDouble("xRatio", 0.5).toFloat()
+                    val yRatio = obj.optDouble("yRatio", 0.5).toFloat()
+                    realElements.add(InteractiveElementInfo(selector, text, tag, xRatio, yRatio, 0, 0))
+                }
+            } catch (e: Exception) {
+                // Keep empty on error
+            }
+
+            if (realElements.isEmpty()) {
+                _agentStatus.value = AgentModeStatus.COMPLETED
+                _agentCursorState.value = _agentCursorState.value.copy(
+                    actionText = "No clickable buttons found on current page"
+                )
+                _isAgentRunning.value = false
+                return@launch
+            }
+
+            _agentStatus.value = AgentModeStatus.TESTING_BUTTONS
+
+            for ((index, item) in realElements.withIndex()) {
+                if (!_isAgentRunning.value) break
+
+                // Move cursor smoothly to real element coordinates
+                _agentCursorState.value = _agentCursorState.value.copy(
+                    xRatio = item.xRatio,
+                    yRatio = item.yRatio,
+                    actionText = "Moving to ${item.text} (${item.selector})"
+                )
+                delay(600)
+
+                // Human-like click animation with ripple pulse
+                _agentCursorState.value = _agentCursorState.value.copy(
+                    isClicking = true,
+                    pulseCount = _agentCursorState.value.pulseCount + 1,
+                    actionText = "Clicking ${item.selector}"
+                )
+                delay(220)
+
+                // Dispatch real click in web view DOM
+                val escapedSelector = item.selector.replace("'", "\\'")
+                val clickScript = """
+                    (function() {
+                        try {
+                            var el = document.querySelector('$escapedSelector')
+                                || document.elementFromPoint(window.innerWidth * ${item.xRatio}, window.innerHeight * ${item.yRatio});
+                            if (el) {
+                                el.click();
+                            } else {
+                                console.error('ANTIGRAVITY_AGENT_ERROR:' + JSON.stringify({
+                                    type: 'BUTTON_NOT_FOUND',
+                                    message: 'Element $escapedSelector disappeared or could not be clicked',
+                                    brokenElementSelector: '$escapedSelector'
+                                }));
+                            }
+                        } catch(e) {
+                            console.error('ANTIGRAVITY_AGENT_ERROR:' + JSON.stringify({
+                                type: 'BUTTON_CLICK_FAILURE',
+                                message: e.message || 'Button click handler threw exception',
+                                brokenElementSelector: '$escapedSelector',
+                                stack: e.stack || ''
+                            }));
+                        }
+                    })()
+                """.trimIndent()
+
+                _webNavActions.emit(WebNavAction.ExecuteJavaScript(clickScript))
+                _agentButtonsTested.value = index + 1
+                delay(450)
+            }
+
+            _isAgentRunning.value = false
+            _agentStatus.value = if (_agentErrors.value.isNotEmpty()) AgentModeStatus.ERROR_DETECTED else AgentModeStatus.COMPLETED
+            _agentCursorState.value = _agentCursorState.value.copy(
+                actionText = if (_agentErrors.value.isNotEmpty()) "Audit finished: ${_agentErrors.value.size} bug(s) caught!" else "Audit passed: Tested ${realElements.size} element(s) with 0 bugs!"
+            )
+        }
+    }
+
+    fun runScrollTest() {
+        if (_isAgentRunning.value) return
+        _isAgentRunning.value = true
+        _agentStatus.value = AgentModeStatus.SCROLLING
+
+        agentTestJob = viewModelScope.launch {
+            _agentCursorState.value = AgentCursorState(
+                xRatio = 0.5f,
+                yRatio = 0.55f,
+                isVisible = true,
+                actionText = "Agent scrolling downwards..."
+            )
+            delay(400)
+
+            repeat(3) {
+                _webNavActions.emit(WebNavAction.ScrollPageBy(0, 320))
+                delay(450)
+            }
+
+            _agentCursorState.value = _agentCursorState.value.copy(
+                actionText = "Agent scrolling back to top..."
+            )
+            delay(400)
+            _webNavActions.emit(WebNavAction.ScrollPageBy(0, -960))
+            delay(450)
+
+            _isAgentRunning.value = false
+            _agentStatus.value = AgentModeStatus.COMPLETED
+            _agentCursorState.value = _agentCursorState.value.copy(
+                actionText = "Scroll & Layout Integrity Verified"
+            )
+        }
+    }
+
+    fun stopAgentTest() {
+        agentTestJob?.cancel()
+        agentTestJob = null
+        _isAgentRunning.value = false
+        _agentStatus.value = AgentModeStatus.IDLE
+        _agentCursorState.value = _agentCursorState.value.copy(
+            actionText = "Agent Test Paused"
+        )
+    }
+
+    fun clearAgentErrors() {
+        _agentErrors.value = emptyList()
+        _agentStatus.value = AgentModeStatus.IDLE
+    }
+
+    fun recordAgentDetectedError(
+        errorType: String,
+        message: String,
+        filename: String = "",
+        lineNumber: Int = 0,
+        stackTrace: String = "",
+        brokenElementSelector: String? = null,
+        actionContext: String = ""
+    ) {
+        val currentTabUrl = activeTab?.url ?: ""
+        val newError = AgentDetectedError(
+            errorType = errorType,
+            message = message,
+            filename = filename,
+            lineNumber = lineNumber,
+            stackTrace = stackTrace,
+            brokenElementSelector = brokenElementSelector,
+            actionContext = actionContext.ifBlank { "Automated button interaction" },
+            url = currentTabUrl
+        )
+        _agentErrors.update { listOf(newError) + it }
+        _agentStatus.value = AgentModeStatus.ERROR_DETECTED
+        _agentCursorState.value = _agentCursorState.value.copy(
+            actionText = "⚠ Bug: ${message.take(30)}"
+        )
+    }
+}

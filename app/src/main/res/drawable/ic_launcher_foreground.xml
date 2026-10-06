@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Minimalist Precision Ring / Outer Circle -->
+    <path
+        android:pathData="M54,27 C39.1,27 27,39.1 27,54 C27,68.9 39.1,81 54,81 C68.9,81 81,68.9 81,54 C81,39.1 68.9,27 54,27 Z"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="2.5"
+        android:fillColor="#00000000" />
+
+    <!-- Subtle Equatorial Axis Line -->
+    <path
+        android:pathData="M27,54 L81,54"
+        android:strokeColor="#40FFFFFF"
+        android:strokeWidth="1.2" />
+
+    <!-- Subtle Elliptical Meridian -->
+    <path
+        android:pathData="M54,27 C42,35 42,73 54,81 C66,73 66,35 54,27 Z"
+        android:strokeColor="#70FFFFFF"
+        android:strokeWidth="1.5"
+        android:fillColor="#00000000" />
+
+    <!-- Central Precision Compass Core -->
+    <path
+        android:pathData="M54,51 A3,3 0 1,0 54,57 A3,3 0 1,0 54,51"
+        android:fillColor="#FFFFFF" />
+</vector>
