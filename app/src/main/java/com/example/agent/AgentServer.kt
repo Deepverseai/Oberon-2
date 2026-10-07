@@ -51,7 +51,7 @@ class AgentServer(
         isRunning.set(false)
         try {
             serverSocket?.close()
-        } catch (_: Exception) {}
+        } catch (e: Exception) {}
         executor.shutdownNow()
     }
 
@@ -125,9 +125,9 @@ class AgentServer(
         } catch (e: Exception) {
             try {
                 sendResponse(socket.getOutputStream(), 500, """{"status":"error","message":"${e.message}"}""")
-            } catch (_: Exception) {}
+            } catch (ignored: Exception) {}
         } finally {
-            try { socket.close() } catch (_: Exception) {}
+            try { socket.close() } catch (ignored: Exception) {}
         }
     }
 
