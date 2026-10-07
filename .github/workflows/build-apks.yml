@@ -22,7 +22,40 @@ jobs:
           java-version: '17'
           cache: 'gradle'
 
-      - name: Create Mock/Fallback Keystore for Release Build
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Setup Gradle Wrapper
+        run: |
+          if [ ! -f "gradlew" ]; then
+            gradle wrapper --gradle-version 8.11.1
+          fi
+          chmod +x gradlew
+
+      - name: Ensure Debug Keystore Exists
+        run: |
+          if [ -f "debug.keystore.base64" ]; then
+            echo "Decoding debug.keystore from base64..."
+            base64 -d debug.keystore.base64 > debug.keystore || true
+          fi
+          if [ ! -f "debug.keystore" ]; then
+            echo "Generating debug.keystore..."
+            keytool -genkeypair -v \
+              -keystore debug.keystore \
+              -storepass android \
+              -alias androiddebugkey \
+              -keypass android \
+              -keyalg RSA \
+              -keysize 2048 \
+              -validity 10000 \
+              -dname "CN=Android Debug,O=Android,C=US"
+          fi
+          echo "debug.keystore ready."
+
+      - name: Setup Release Keystore
         run: |
           mkdir -p release_keys
           keytool -genkeypair -v \
@@ -38,20 +71,48 @@ jobs:
           echo "STORE_PASSWORD=android" >> $GITHUB_ENV
           echo "KEY_PASSWORD=android" >> $GITHUB_ENV
 
-      - name: Restore Debug Keystore if Base64 present
+      - name: Ensure Dummy google-services.json Exists
         run: |
-          if [ -f "debug.keystore.base64" ]; then
-            base64 -d debug.keystore.base64 > debug.keystore || true
+          if [ ! -f "app/google-services.json" ]; then
+            echo "Creating dummy google-services.json for CI..."
+            cat << 'EOF' > app/google-services.json
+          {
+            "project_info": {
+              "project_number": "123456789012",
+              "project_id": "oberon-browser-mock",
+              "storage_bucket": "oberon-browser-mock.appspot.com"
+            },
+            "client": [
+              {
+                "client_info": {
+                  "mobilesdk_app_id": "1:123456789012:android:abcdef1234567890",
+                  "android_client_info": {
+                    "package_name": "com.aistudio.oberonbrowser.qkrvwx"
+                  }
+                },
+                "oauth_client": [],
+                "api_key": [
+                  {
+                    "current_key": "dummy_api_key_for_ci_build"
+                  }
+                ],
+                "services": {
+                  "appinvite_service": {
+                    "other_platform_oauth_client": []
+                  }
+                }
+              }
+            ],
+            "configuration_version": "1"
+          }
+          EOF
           fi
 
-      - name: Grant Execute Permission for Gradle
-        run: chmod +x gradlew || true
-
       - name: Build Debug APK
-        run: ./gradlew assembleDebug --stacktrace || gradle assembleDebug --stacktrace
+        run: ./gradlew assembleDebug --stacktrace --no-daemon
 
       - name: Build Release APK
-        run: ./gradlew assembleRelease --stacktrace || gradle assembleRelease --stacktrace
+        run: ./gradlew assembleRelease --stacktrace --no-daemon
 
       - name: Prepare APKs Directory and Zip
         run: |
@@ -60,10 +121,10 @@ jobs:
           find app/build/outputs/apk/debug -name "*.apk" -exec cp {} output_apks/ \; || true
           # Copy Release APKs
           find app/build/outputs/apk/release -name "*.apk" -exec cp {} output_apks/ \; || true
-          
-          echo "Listing gathered APKs:"
+
+          echo "Listing gathered APKs in output_apks:"
           ls -la output_apks/
-          
+
           # Create combined ZIP archive
           zip -j output_apks/all-apks.zip output_apks/*.apk
 

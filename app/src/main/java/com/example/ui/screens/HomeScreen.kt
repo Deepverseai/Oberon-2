@@ -26,6 +26,7 @@ import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.SmartToy
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.AlertDialog
@@ -46,7 +47,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -131,39 +134,19 @@ fun HomeScreen(
                         modifier = Modifier.padding(horizontal = 24.dp)
                     )
                 } else {
-                    // Refined Minimalist Logo: perfectly sized, clean and elegant (Chrome aesthetic)
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.Center
-                    ) {
-                        Surface(
-                            shape = CircleShape,
-                            color = MaterialTheme.colorScheme.primaryContainer,
-                            modifier = Modifier.size(34.dp)
-                        ) {
-                            Box(contentAlignment = Alignment.Center) {
-                                Text(
-                                    text = "O",
-                                    fontSize = 18.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = MaterialTheme.colorScheme.primary
-                                )
-                            }
-                        }
-                        Spacer(modifier = Modifier.width(10.dp))
-                        Text(
-                            text = "Oberon",
-                            fontSize = 20.sp,
-                            fontWeight = FontWeight.Medium,
-                            letterSpacing = 0.5.sp,
-                            color = MaterialTheme.colorScheme.onBackground
-                        )
-                    }
+                    // Refined Minimalist Logo: clean, modern and elegant brand identity
+                    Text(
+                        text = "Oberon",
+                        fontSize = 28.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        letterSpacing = (-0.5).sp,
+                        color = MaterialTheme.colorScheme.onBackground
+                    )
                 }
             }
         }
 
-        // Clean Search Capsule (Standard Chrome Android style)
+        // Clean Search Capsule (Seamless background matching, premium border and styling)
         item {
             Surface(
                 modifier = Modifier
@@ -174,7 +157,10 @@ fun HomeScreen(
                     .testTag("home_search_pill"),
                 shape = RoundedCornerShape(26.dp),
                 color = MaterialTheme.colorScheme.surfaceVariant,
-                border = CardDefaults.outlinedCardBorder().copy(width = 0.6.dp)
+                border = CardDefaults.outlinedCardBorder().copy(
+                    width = 0.8.dp,
+                    brush = SolidColor(MaterialTheme.colorScheme.outline.copy(alpha = 0.18f))
+                )
             ) {
                 Row(
                     modifier = Modifier
@@ -259,62 +245,6 @@ fun HomeScreen(
             }
         }
 
-        // Antigravity Agent & Dev Server Preview Card
-        if (!isIncognito) {
-            item {
-                Surface(
-                    shape = RoundedCornerShape(16.dp),
-                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f),
-                    border = CardDefaults.outlinedCardBorder().copy(width = 0.5.dp),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(16.dp))
-                        .clickable { onOpenSandbox() }
-                ) {
-                    Row(
-                        modifier = Modifier.padding(14.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Surface(
-                            shape = CircleShape,
-                            color = ChromeBlue.copy(alpha = 0.12f),
-                            modifier = Modifier.size(38.dp)
-                        ) {
-                            Box(contentAlignment = Alignment.Center) {
-                                Icon(
-                                    imageVector = Icons.Default.SmartToy,
-                                    contentDescription = null,
-                                    tint = ChromeBlue,
-                                    modifier = Modifier.size(20.dp)
-                                )
-                            }
-                        }
-                        Spacer(modifier = Modifier.width(12.dp))
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = "App & Web Preview Sandbox",
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
-                            Spacer(modifier = Modifier.height(2.dp))
-                            Text(
-                                text = "Test local dev servers, inspect buttons & run autonomous agent cursor",
-                                fontSize = 11.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Filled.ArrowForward,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(16.dp)
-                        )
-                    }
-                }
-            }
-        }
-
         // Recent Real Visited Pages (Only shown if user has actual history)
         if (!isIncognito && showRecent && recentHistory.isNotEmpty()) {
             item {
@@ -324,7 +254,9 @@ fun HomeScreen(
                         .padding(top = 4.dp)
                 ) {
                     Row(
-                        modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 6.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 4.dp, vertical = 6.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
@@ -394,32 +326,80 @@ fun HomeScreen(
             }
         }
 
-        // Privacy Shield Status Pill
-        if (!isIncognito && showShield) {
+        // Sleek Minimalist Web Preview Sandbox Chip (Developer tool)
+        if (!isIncognito) {
             item {
                 Surface(
-                    shape = RoundedCornerShape(16.dp),
-                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
-                    border = CardDefaults.outlinedCardBorder().copy(width = 0.5.dp),
+                    shape = RoundedCornerShape(14.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
+                    border = CardDefaults.outlinedCardBorder().copy(
+                        width = 0.6.dp,
+                        brush = SolidColor(MaterialTheme.colorScheme.outline.copy(alpha = 0.12f))
+                    ),
                     modifier = Modifier
-                        .clip(RoundedCornerShape(16.dp))
-                        .clickable { onOpenPrivacyShields() }
+                        .clip(RoundedCornerShape(14.dp))
+                        .clickable { onOpenSandbox() }
+                        .testTag("home_sandbox_entry")
                 ) {
                     Row(
-                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 7.dp),
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Box(
-                            modifier = Modifier
-                                .size(6.dp)
-                                .clip(CircleShape)
-                                .background(ChromeGreen)
+                        Icon(
+                            imageVector = Icons.Default.SmartToy,
+                            contentDescription = null,
+                            tint = ChromeBlue,
+                            modifier = Modifier.size(15.dp)
                         )
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
-                            text = "Privacy Shield • ${shieldStats.trackersBlocked} Trackers blocked",
+                            text = "Web Preview Sandbox",
                             fontSize = 12.sp,
-                            fontWeight = FontWeight.Medium,
+                            fontWeight = FontWeight.Normal,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                            modifier = Modifier.size(12.dp)
+                        )
+                    }
+                }
+            }
+        }
+
+        // Working Privacy Shield Status (Real Ad & Tracker blocker telemetry)
+        if (!isIncognito && showShield && shieldStats.trackersBlocked > 0) {
+            item {
+                Surface(
+                    shape = RoundedCornerShape(14.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
+                    border = CardDefaults.outlinedCardBorder().copy(
+                        width = 0.6.dp,
+                        brush = SolidColor(MaterialTheme.colorScheme.outline.copy(alpha = 0.12f))
+                    ),
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(14.dp))
+                        .clickable { onOpenPrivacyShields() }
+                        .testTag("home_shield_indicator")
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Shield,
+                            contentDescription = null,
+                            tint = ChromeGreen,
+                            modifier = Modifier.size(13.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = "${shieldStats.trackersBlocked} Trackers blocked",
+                            fontSize = 11.5.sp,
+                            fontWeight = FontWeight.Normal,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }

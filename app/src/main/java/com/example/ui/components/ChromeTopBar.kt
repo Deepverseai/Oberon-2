@@ -64,7 +64,7 @@ fun ChromeTopBar(
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .background(MaterialTheme.colorScheme.surface)
+            .background(if (isBlank) MaterialTheme.colorScheme.background else MaterialTheme.colorScheme.surface)
     ) {
         Row(
             modifier = Modifier
