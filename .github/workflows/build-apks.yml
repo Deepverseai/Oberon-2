@@ -110,10 +110,28 @@ jobs:
           fi
 
       - name: Build Debug APK
-        run: ./gradlew assembleDebug --stacktrace --no-daemon
+        run: |
+          set -o pipefail
+          ./gradlew assembleDebug --stacktrace --no-daemon 2>&1 | tee debug-build.log || {
+            echo "## ❌ Debug Build Failure Summary" >> $GITHUB_STEP_SUMMARY
+            echo '```text' >> $GITHUB_STEP_SUMMARY
+            grep -E '(^e:|^w:|^FAILURE:|^BUILD FAILED|^Caused by:)' debug-build.log | head -n 50 >> $GITHUB_STEP_SUMMARY
+            tail -n 60 debug-build.log >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            exit 1
+          }
 
       - name: Build Release APK
-        run: ./gradlew assembleRelease --stacktrace --no-daemon
+        run: |
+          set -o pipefail
+          ./gradlew assembleRelease --stacktrace --no-daemon 2>&1 | tee release-build.log || {
+            echo "## ❌ Release Build Failure Summary" >> $GITHUB_STEP_SUMMARY
+            echo '```text' >> $GITHUB_STEP_SUMMARY
+            grep -E '(^e:|^w:|^FAILURE:|^BUILD FAILED|^Caused by:)' release-build.log | head -n 50 >> $GITHUB_STEP_SUMMARY
+            tail -n 60 release-build.log >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            exit 1
+          }
 
       - name: Package APKs into Zip
         run: |

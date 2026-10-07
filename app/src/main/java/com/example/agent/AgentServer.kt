@@ -146,7 +146,7 @@ class AgentServer(
                 "new_tab" -> {
                     val url = req.optString("url", "")
                     scope.launch(Dispatchers.Main) {
-                        viewModel.createNewTab(url)
+                        viewModel.createNewTab(initialUrl = url)
                     }
                     JSONObject().put("status", "ok").put("url", url).toString()
                 }
