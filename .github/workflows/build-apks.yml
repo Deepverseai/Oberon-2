@@ -1,0 +1,75 @@
+name: Build and Zip Debug and Release APKs
+
+on:
+  push:
+    branches: [ "main", "master" ]
+  pull_request:
+    branches: [ "main", "master" ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+          cache: 'gradle'
+
+      - name: Create Mock/Fallback Keystore for Release Build
+        run: |
+          mkdir -p release_keys
+          keytool -genkeypair -v \
+            -keystore release_keys/upload-key.jks \
+            -alias upload \
+            -keyalg RSA \
+            -keysize 2048 \
+            -validity 10000 \
+            -storepass android \
+            -keypass android \
+            -dname "CN=OberonBrowser, OU=Dev, O=Oberon, L=Global, S=Global, C=US"
+          echo "KEYSTORE_PATH=${{ github.workspace }}/release_keys/upload-key.jks" >> $GITHUB_ENV
+          echo "STORE_PASSWORD=android" >> $GITHUB_ENV
+          echo "KEY_PASSWORD=android" >> $GITHUB_ENV
+
+      - name: Restore Debug Keystore if Base64 present
+        run: |
+          if [ -f "debug.keystore.base64" ]; then
+            base64 -d debug.keystore.base64 > debug.keystore || true
+          fi
+
+      - name: Grant Execute Permission for Gradle
+        run: chmod +x gradlew || true
+
+      - name: Build Debug APK
+        run: ./gradlew assembleDebug --stacktrace || gradle assembleDebug --stacktrace
+
+      - name: Build Release APK
+        run: ./gradlew assembleRelease --stacktrace || gradle assembleRelease --stacktrace
+
+      - name: Prepare APKs Directory and Zip
+        run: |
+          mkdir -p output_apks
+          # Copy Debug APKs
+          find app/build/outputs/apk/debug -name "*.apk" -exec cp {} output_apks/ \; || true
+          # Copy Release APKs
+          find app/build/outputs/apk/release -name "*.apk" -exec cp {} output_apks/ \; || true
+          
+          echo "Listing gathered APKs:"
+          ls -la output_apks/
+          
+          # Create combined ZIP archive
+          zip -j output_apks/all-apks.zip output_apks/*.apk
+
+      - name: Upload APKs Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: oberon-browser-apks
+          path: output_apks/
+          retention-days: 14
