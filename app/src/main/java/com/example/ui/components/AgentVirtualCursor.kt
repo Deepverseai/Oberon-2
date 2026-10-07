@@ -22,6 +22,8 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
@@ -128,20 +130,26 @@ fun AgentVirtualCursor(
                 drawPath(path = path, color = ChromeBlue)
             }
 
-            // Floating status chip attached to cursor
+            // Floating status chip attached to cursor with smart boundary flipping
             if (cursorState.actionText.isNotBlank()) {
+                val isNearRightEdge = cursorState.xRatio > 0.52f
+                val isNearBottomEdge = cursorState.yRatio > 0.82f
+
                 Surface(
-                    shape = RoundedCornerShape(12.dp),
+                    shape = RoundedCornerShape(16.dp),
                     color = MaterialTheme.colorScheme.surface.copy(alpha = 0.95f),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, ChromeBlue.copy(alpha = 0.5f)),
-                    shadowElevation = 6.dp,
+                    border = androidx.compose.foundation.BorderStroke(1.dp, ChromeBlue.copy(alpha = 0.55f)),
+                    shadowElevation = 8.dp,
                     modifier = Modifier
-                        .offset(x = 18.dp, y = 14.dp)
-                        .padding(end = 12.dp)
+                        .offset(
+                            x = if (isNearRightEdge) (-175).dp else 20.dp,
+                            y = if (isNearBottomEdge) (-34).dp else 16.dp
+                        )
+                        .widthIn(max = 175.dp)
                 ) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                        modifier = Modifier.padding(horizontal = 9.dp, vertical = 5.dp)
                     ) {
                         Box(
                             modifier = Modifier
@@ -155,7 +163,8 @@ fun AgentVirtualCursor(
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Medium,
                             color = MaterialTheme.colorScheme.onSurface,
-                            maxLines = 1
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
                     }
                 }
