@@ -39,6 +39,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.lifecycle.lifecycleScope
+import com.example.agent.AgentServer
 import com.example.data.local.QuickLinkEntity
 import com.example.model.ActiveScreen
 import com.example.model.ThemePreference
@@ -68,12 +70,33 @@ import kotlinx.coroutines.launch
 import org.json.JSONObject
 
 class MainActivity : ComponentActivity() {
+
+    private lateinit var viewModel: BrowserViewModel
+    private var agentServer: AgentServer? = null
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
+        viewModel = androidx.lifecycle.ViewModelProvider(this)[BrowserViewModel::class.java]
+
+        // Handle initial incoming URL from Android intent
+        intent?.dataString?.let { incomingUrl ->
+            if (incomingUrl.isNotBlank()) {
+                viewModel.openUrl(incomingUrl)
+            }
+        }
+
+        // Start embedded AgentServer for Antigravity CLI automation on 127.0.0.1:8765
+        try {
+            agentServer = AgentServer(viewModel, lifecycleScope)
+            agentServer?.start()
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+
         setContent {
-            val viewModel: BrowserViewModel = viewModel()
+            val viewModel = this.viewModel
             val tabs by viewModel.tabs.collectAsStateWithLifecycle()
             val activeTabId by viewModel.activeTabId.collectAsStateWithLifecycle()
             val currentScreen by viewModel.currentScreen.collectAsStateWithLifecycle()
@@ -228,6 +251,25 @@ class MainActivity : ComponentActivity() {
                     }
                 }
             }
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        intent.dataString?.let { incomingUrl ->
+            if (incomingUrl.isNotBlank()) {
+                viewModel.openUrl(incomingUrl)
+            }
+        }
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        try {
+            agentServer?.stop()
+        } catch (e: Exception) {
+            e.printStackTrace()
         }
     }
 }

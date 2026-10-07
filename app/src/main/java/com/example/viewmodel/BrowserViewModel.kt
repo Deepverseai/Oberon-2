@@ -891,4 +891,116 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
             actionText = "⚠ Bug: ${message.take(30)}"
         )
     }
+
+    // --- Direct Agent Server Integration API for Antigravity CLI Bridge ---
+
+    fun scrollPage(dx: Int, dy: Int) {
+        viewModelScope.launch {
+            _webNavActions.emit(WebNavAction.ScrollPageBy(dx, dy))
+        }
+    }
+
+    suspend fun executeJavaScriptAsync(script: String, timeoutMs: Long = 4000): String {
+        val completable = CompletableDeferred<String>()
+        _webNavActions.emit(WebNavAction.ExecuteJavaScript(script) { result ->
+            completable.complete(result ?: "")
+        })
+        return try {
+            withTimeout(timeoutMs) { completable.await() }
+        } catch (e: Exception) {
+            ""
+        }
+    }
+
+    suspend fun agentClickSelector(selector: String): JSONObject {
+        val escaped = selector.replace("'", "\\'")
+        val queryScript = """
+            (function() {
+                var el = document.querySelector('$escaped');
+                if (!el) return JSON.stringify({found: false});
+                var rect = el.getBoundingClientRect();
+                var x = (rect.left + rect.width / 2) / Math.max(1, window.innerWidth);
+                var y = (rect.top + rect.height / 2) / Math.max(1, window.innerHeight);
+                return JSON.stringify({
+                    found: true,
+                    xRatio: Math.max(0.05, Math.min(0.95, x)),
+                    yRatio: Math.max(0.05, Math.min(0.95, y))
+                });
+            })()
+        """.trimIndent()
+
+        val jsonStr = executeJavaScriptAsync(queryScript)
+        var clean = jsonStr.trim()
+        if (clean.startsWith("\"") && clean.endsWith("\"")) {
+            clean = clean.substring(1, clean.length - 1).replace("\\\"", "\"").replace("\\\\", "\\")
+        }
+        val info = try { JSONObject(clean) } catch (e: Exception) { JSONObject().put("found", false) }
+
+        if (info.optBoolean("found")) {
+            val xRatio = info.optDouble("xRatio", 0.5).toFloat()
+            val yRatio = info.optDouble("yRatio", 0.5).toFloat()
+
+            _agentCursorState.value = _agentCursorState.value.copy(
+                xRatio = xRatio,
+                yRatio = yRatio,
+                isVisible = true,
+                actionText = "Targeting $selector"
+            )
+            delay(350)
+
+            _agentCursorState.value = _agentCursorState.value.copy(
+                isClicking = true,
+                pulseCount = _agentCursorState.value.pulseCount + 1,
+                actionText = "Clicking $selector"
+            )
+            delay(150)
+
+            val clickScript = """
+                (function() {
+                    var el = document.querySelector('$escaped');
+                    if (el) el.click();
+                })()
+            """.trimIndent()
+            executeJavaScriptAsync(clickScript)
+        }
+        return info
+    }
+
+    suspend fun agentTypeText(selector: String, text: String): JSONObject {
+        val escapedSel = selector.replace("'", "\\'")
+        val escapedText = JSONObject.quote(text)
+        val script = """
+            (function() {
+                var el = document.querySelector('$escapedSel');
+                if (!el) return JSON.stringify({found: false});
+                el.focus();
+                el.value = $escapedText;
+                el.dispatchEvent(new Event('input', { bubbles: true }));
+                el.dispatchEvent(new Event('change', { bubbles: true }));
+                return JSON.stringify({found: true});
+            })()
+        """.trimIndent()
+        val res = executeJavaScriptAsync(script)
+        return try { JSONObject(res) } catch (e: Exception) { JSONObject().put("status", "ok") }
+    }
+
+    suspend fun agentExtractText(): String {
+        val script = "(function() { return document.body ? document.body.innerText : ''; })()"
+        val res = executeJavaScriptAsync(script)
+        var clean = res.trim()
+        if (clean.startsWith("\"") && clean.endsWith("\"")) {
+            clean = clean.substring(1, clean.length - 1).replace("\\n", "\n").replace("\\\"", "\"").replace("\\\\", "\\")
+        }
+        return clean
+    }
+
+    suspend fun agentGetHtml(): String {
+        val script = "(function() { return document.documentElement ? document.documentElement.outerHTML : ''; })()"
+        val res = executeJavaScriptAsync(script)
+        var clean = res.trim()
+        if (clean.startsWith("\"") && clean.endsWith("\"")) {
+            clean = clean.substring(1, clean.length - 1).replace("\\n", "\n").replace("\\\"", "\"").replace("\\\\", "\\")
+        }
+        return clean
+    }
 }

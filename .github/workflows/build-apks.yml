@@ -115,23 +115,18 @@ jobs:
       - name: Build Release APK
         run: ./gradlew assembleRelease --stacktrace --no-daemon
 
-      - name: Prepare APKs Directory and Zip
+      - name: Package APKs into Zip
         run: |
-          mkdir -p output_apks
-          # Copy Debug APKs
-          find app/build/outputs/apk/debug -name "*.apk" -exec cp {} output_apks/ \; || true
-          # Copy Release APKs
-          find app/build/outputs/apk/release -name "*.apk" -exec cp {} output_apks/ \; || true
+          mkdir -p artifacts
+          cd app/build/outputs/apk/
+          zip -r ../../../../artifacts/oberon-browser-apks.zip . -i "*.apk"
+          cd ../../../..
+          echo "Listing packaged artifact:"
+          ls -lh artifacts/oberon-browser-apks.zip
 
-          echo "Listing gathered APKs in output_apks:"
-          ls -la output_apks/
-
-          # Create combined ZIP archive
-          zip -j output_apks/all-apks.zip output_apks/*.apk
-
-      - name: Upload APKs Artifacts
+      - name: Upload APKs Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: oberon-browser-apks
-          path: output_apks/
+          name: oberon-browser-apks.zip
+          path: artifacts/oberon-browser-apks.zip
           retention-days: 14
