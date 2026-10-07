@@ -675,143 +675,173 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
         agentTestJob = viewModelScope.launch {
             injectAgentObserver()
 
-            // 1. Initial human-like scan gesture
-            _agentCursorState.value = AgentCursorState(
-                xRatio = 0.5f,
-                yRatio = 0.35f,
-                isVisible = true,
-                actionText = "Scanning DOM for interactive elements..."
-            )
-            delay(400)
+            val testedSelectors = mutableSetOf<String>()
+            var totalTested = 0
+            val maxScrollPasses = 5
+            var currentPass = 0
 
-            // Step 1: Real DOM scanning script to query actual buttons and interactive elements
-            val scanScript = """
-                (function() {
-                    var items = [];
-                    var interactive = document.querySelectorAll('button, a, input[type="button"], input[type="submit"], [role="button"], [onclick]');
-                    for (var i = 0; i < interactive.length; i++) {
-                        var el = interactive[i];
-                        var rect = el.getBoundingClientRect();
-                        if (rect.width > 0 && rect.height > 0 && rect.top >= 0 && rect.top <= window.innerHeight && rect.left >= 0 && rect.left <= window.innerWidth) {
-                            var id = el.id ? '#' + el.id : '';
-                            var cls = (el.className && typeof el.className === 'string' && el.className.trim().length > 0) ? '.' + el.className.trim().split(/\s+/)[0] : '';
-                            var sel = id || (el.tagName.toLowerCase() + cls) || el.tagName.toLowerCase();
-                            var txt = (el.innerText || el.value || el.getAttribute('aria-label') || el.title || el.tagName.toLowerCase()).replace(/\s+/g, ' ').trim();
-                            if (txt.length > 25) txt = txt.substring(0, 25) + '...';
-                            var x = (rect.left + rect.width / 2) / Math.max(1, window.innerWidth);
-                            var y = (rect.top + rect.height / 2) / Math.max(1, window.innerHeight);
-                            items.push({
-                                selector: sel,
-                                text: txt || 'Element',
-                                xRatio: Math.max(0.06, Math.min(0.94, x)),
-                                yRatio: Math.max(0.06, Math.min(0.94, y)),
-                                tag: el.tagName.toLowerCase()
-                            });
-                            if (items.length >= 12) break;
-                        }
-                    }
-                    return JSON.stringify(items);
-                })()
-            """.trimIndent()
-
-            val scanCompletable = CompletableDeferred<String>()
-            _webNavActions.emit(WebNavAction.ExecuteJavaScript(scanScript) { result ->
-                scanCompletable.complete(result ?: "[]")
-            })
-
-            val discoveredElementsJson = try {
-                withTimeout(3000) { scanCompletable.await() }
-            } catch (e: Exception) {
-                "[]"
-            }
-
-            // Parse real discovered DOM elements
-            val realElements = mutableListOf<InteractiveElementInfo>()
-            try {
-                var cleanJson = discoveredElementsJson.trim()
-                if (cleanJson.startsWith("\"") && cleanJson.endsWith("\"")) {
-                    cleanJson = cleanJson.substring(1, cleanJson.length - 1).replace("\\\"", "\"").replace("\\\\", "\\")
-                }
-                val jsonArr = JSONArray(cleanJson)
-                for (i in 0 until jsonArr.length()) {
-                    val obj = jsonArr.getJSONObject(i)
-                    val selector = obj.optString("selector", "button")
-                    val text = obj.optString("text", "Button")
-                    val tag = obj.optString("tag", "button")
-                    val xRatio = obj.optDouble("xRatio", 0.5).toFloat()
-                    val yRatio = obj.optDouble("yRatio", 0.5).toFloat()
-                    realElements.add(InteractiveElementInfo(selector, text, tag, xRatio, yRatio, 0, 0))
-                }
-            } catch (e: Exception) {
-                // Keep empty on error
-            }
-
-            if (realElements.isEmpty()) {
-                _agentStatus.value = AgentModeStatus.COMPLETED
-                _agentCursorState.value = _agentCursorState.value.copy(
-                    actionText = "No clickable buttons found on current page"
+            while (_isAgentRunning.value && currentPass < maxScrollPasses) {
+                currentPass++
+                _agentStatus.value = AgentModeStatus.SCANNING
+                _agentCursorState.value = AgentCursorState(
+                    xRatio = 0.5f,
+                    yRatio = 0.35f,
+                    isVisible = true,
+                    actionText = if (currentPass == 1) "Scanning initial viewport..." else "Scanning viewport (Section $currentPass)..."
                 )
-                _isAgentRunning.value = false
-                return@launch
-            }
+                delay(400)
 
-            _agentStatus.value = AgentModeStatus.TESTING_BUTTONS
-
-            for ((index, item) in realElements.withIndex()) {
-                if (!_isAgentRunning.value) break
-
-                // Move cursor smoothly to real element coordinates
-                _agentCursorState.value = _agentCursorState.value.copy(
-                    xRatio = item.xRatio,
-                    yRatio = item.yRatio,
-                    actionText = "Moving to ${item.text} (${item.selector})"
-                )
-                delay(600)
-
-                // Human-like click animation with ripple pulse
-                _agentCursorState.value = _agentCursorState.value.copy(
-                    isClicking = true,
-                    pulseCount = _agentCursorState.value.pulseCount + 1,
-                    actionText = "Clicking ${item.selector}"
-                )
-                delay(220)
-
-                // Dispatch real click in web view DOM
-                val escapedSelector = item.selector.replace("'", "\\'")
-                val clickScript = """
+                // Scan currently visible interactive elements in [0, window.innerHeight]
+                val scanScript = """
                     (function() {
-                        try {
-                            var el = document.querySelector('$escapedSelector')
-                                || document.elementFromPoint(window.innerWidth * ${item.xRatio}, window.innerHeight * ${item.yRatio});
-                            if (el) {
-                                el.click();
-                            } else {
-                                console.error('ANTIGRAVITY_AGENT_ERROR:' + JSON.stringify({
-                                    type: 'BUTTON_NOT_FOUND',
-                                    message: 'Element $escapedSelector disappeared or could not be clicked',
-                                    brokenElementSelector: '$escapedSelector'
-                                }));
+                        var items = [];
+                        var interactive = document.querySelectorAll('button, a, input[type="button"], input[type="submit"], [role="button"], [onclick]');
+                        for (var i = 0; i < interactive.length; i++) {
+                            var el = interactive[i];
+                            var rect = el.getBoundingClientRect();
+                            if (rect.width > 8 && rect.height > 8 && rect.top >= 0 && rect.top <= window.innerHeight && rect.left >= 0 && rect.left <= window.innerWidth) {
+                                var id = el.id ? '#' + el.id : '';
+                                var cls = (el.className && typeof el.className === 'string' && el.className.trim().length > 0) ? '.' + el.className.trim().split(/\s+/)[0] : '';
+                                var sel = id || (el.tagName.toLowerCase() + cls) || el.tagName.toLowerCase();
+                                var txt = (el.innerText || el.value || el.getAttribute('aria-label') || el.title || el.tagName.toLowerCase()).replace(/\s+/g, ' ').trim();
+                                if (txt.length > 25) txt = txt.substring(0, 25) + '...';
+                                var x = (rect.left + rect.width / 2) / Math.max(1, window.innerWidth);
+                                var y = (rect.top + rect.height / 2) / Math.max(1, window.innerHeight);
+                                items.push({
+                                    selector: sel,
+                                    text: txt || 'Element',
+                                    xRatio: Math.max(0.06, Math.min(0.94, x)),
+                                    yRatio: Math.max(0.06, Math.min(0.94, y)),
+                                    tag: el.tagName.toLowerCase()
+                                });
+                                if (items.length >= 10) break;
                             }
-                        } catch(e) {
-                            console.error('ANTIGRAVITY_AGENT_ERROR:' + JSON.stringify({
-                                type: 'BUTTON_CLICK_FAILURE',
-                                message: e.message || 'Button click handler threw exception',
-                                brokenElementSelector: '$escapedSelector',
-                                stack: e.stack || ''
-                            }));
                         }
+                        var isAtBottom = (window.innerHeight + window.pageYOffset) >= (document.body.offsetHeight - 50);
+                        return JSON.stringify({ items: items, isAtBottom: isAtBottom });
                     })()
                 """.trimIndent()
 
-                _webNavActions.emit(WebNavAction.ExecuteJavaScript(clickScript))
-                _agentButtonsTested.value = index + 1
-                delay(450)
+                val scanCompletable = CompletableDeferred<String>()
+                _webNavActions.emit(WebNavAction.ExecuteJavaScript(scanScript) { result ->
+                    scanCompletable.complete(result ?: "{}")
+                })
+
+                val scanResultJson = try {
+                    withTimeout(3000) { scanCompletable.await() }
+                } catch (e: Exception) {
+                    "{}"
+                }
+
+                val elementsToTest = mutableListOf<InteractiveElementInfo>()
+                var isAtBottom = false
+                try {
+                    var cleanJson = scanResultJson.trim()
+                    if (cleanJson.startsWith("\"") && cleanJson.endsWith("\"")) {
+                        cleanJson = cleanJson.substring(1, cleanJson.length - 1).replace("\\\"", "\"").replace("\\\\", "\\")
+                    }
+                    val resObj = JSONObject(cleanJson)
+                    isAtBottom = resObj.optBoolean("isAtBottom", false)
+                    val jsonArr = resObj.optJSONArray("items") ?: JSONArray()
+                    for (i in 0 until jsonArr.length()) {
+                        val obj = jsonArr.getJSONObject(i)
+                        val selector = obj.optString("selector", "button")
+                        val text = obj.optString("text", "Button")
+                        val tag = obj.optString("tag", "button")
+                        val xRatio = obj.optDouble("xRatio", 0.5).toFloat()
+                        val yRatio = obj.optDouble("yRatio", 0.5).toFloat()
+                        val uniqueKey = "$selector|$text"
+                        if (uniqueKey !in testedSelectors) {
+                            testedSelectors.add(uniqueKey)
+                            elementsToTest.add(InteractiveElementInfo(selector, text, tag, xRatio, yRatio, 0, 0))
+                        }
+                    }
+                } catch (e: Exception) {}
+
+                // Test discovered elements in this section
+                if (elementsToTest.isNotEmpty()) {
+                    _agentStatus.value = AgentModeStatus.TESTING_BUTTONS
+                    for (item in elementsToTest) {
+                        if (!_isAgentRunning.value) break
+
+                        // Move cursor smoothly to real element coordinates
+                        _agentCursorState.value = _agentCursorState.value.copy(
+                            xRatio = item.xRatio,
+                            yRatio = item.yRatio,
+                            actionText = "Targeting ${item.text.take(18)}"
+                        )
+                        delay(500)
+
+                        // Human-like click animation with pulse
+                        _agentCursorState.value = _agentCursorState.value.copy(
+                            isClicking = true,
+                            pulseCount = _agentCursorState.value.pulseCount + 1,
+                            actionText = "Clicking ${item.selector}"
+                        )
+                        delay(200)
+
+                        // Dispatch real click in web view DOM
+                        val escapedSelector = item.selector.replace("'", "\\'")
+                        val clickScript = """
+                            (function() {
+                                try {
+                                    var el = document.querySelector('$escapedSelector')
+                                        || document.elementFromPoint(window.innerWidth * ${item.xRatio}, window.innerHeight * ${item.yRatio});
+                                    if (el) {
+                                        el.click();
+                                    }
+                                } catch(e) {
+                                    console.error('ANTIGRAVITY_AGENT_ERROR:' + JSON.stringify({
+                                        type: 'BUTTON_CLICK_FAILURE',
+                                        message: e.message || 'Button click handler threw exception',
+                                        brokenElementSelector: '$escapedSelector'
+                                    }));
+                                }
+                            })()
+                        """.trimIndent()
+
+                        _webNavActions.emit(WebNavAction.ExecuteJavaScript(clickScript))
+                        totalTested++
+                        _agentButtonsTested.value = totalTested
+                        delay(400)
+                    }
+                }
+
+                if (isAtBottom) {
+                    break
+                }
+
+                // Smooth Human-Like Swipe Gesture to scroll to next section
+                _agentStatus.value = AgentModeStatus.SCROLLING
+                _agentCursorState.value = _agentCursorState.value.copy(
+                    xRatio = 0.5f,
+                    yRatio = 0.72f,
+                    actionText = "Swiping to next section..."
+                )
+                delay(300)
+
+                _agentCursorState.value = _agentCursorState.value.copy(
+                    xRatio = 0.5f,
+                    yRatio = 0.28f,
+                    actionText = "Scrolling down (viewport ${currentPass + 1})..."
+                )
+                _webNavActions.emit(WebNavAction.ScrollPageBy(0, 380))
+                delay(750)
             }
+
+            // Smooth scroll back to top after full page audit
+            _agentCursorState.value = _agentCursorState.value.copy(
+                xRatio = 0.5f,
+                yRatio = 0.35f,
+                actionText = "Returning smoothly to top..."
+            )
+            _webNavActions.emit(WebNavAction.ScrollPageBy(0, -6000))
+            delay(650)
 
             _isAgentRunning.value = false
             _agentStatus.value = if (_agentErrors.value.isNotEmpty()) AgentModeStatus.ERROR_DETECTED else AgentModeStatus.COMPLETED
             _agentCursorState.value = _agentCursorState.value.copy(
-                actionText = if (_agentErrors.value.isNotEmpty()) "Audit finished: ${_agentErrors.value.size} bug(s) caught!" else "Audit passed: Tested ${realElements.size} element(s) with 0 bugs!"
+                actionText = if (_agentErrors.value.isNotEmpty()) "Audit finished: ${_agentErrors.value.size} bug(s) caught across $totalTested elements!" else "Audit passed: Tested all $totalTested element(s) with 0 bugs!"
             )
         }
     }
@@ -822,25 +852,38 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
         _agentStatus.value = AgentModeStatus.SCROLLING
 
         agentTestJob = viewModelScope.launch {
-            _agentCursorState.value = AgentCursorState(
-                xRatio = 0.5f,
-                yRatio = 0.55f,
-                isVisible = true,
-                actionText = "Agent scrolling downwards..."
-            )
-            delay(400)
+            // Human-like progressive swipe down (3 passes)
+            repeat(3) { pass ->
+                _agentCursorState.value = AgentCursorState(
+                    xRatio = 0.5f,
+                    yRatio = 0.75f,
+                    isVisible = true,
+                    actionText = "Swipe down (Pass ${pass + 1}/3)..."
+                )
+                delay(300)
 
-            repeat(3) {
-                _webNavActions.emit(WebNavAction.ScrollPageBy(0, 320))
-                delay(450)
+                _agentCursorState.value = _agentCursorState.value.copy(
+                    yRatio = 0.28f,
+                    actionText = "Scrolling section ${pass + 1}..."
+                )
+                _webNavActions.emit(WebNavAction.ScrollPageBy(0, 360))
+                delay(700)
             }
 
-            _agentCursorState.value = _agentCursorState.value.copy(
-                actionText = "Agent scrolling back to top..."
+            // Smooth scroll back up
+            _agentCursorState.value = AgentCursorState(
+                xRatio = 0.5f,
+                yRatio = 0.3f,
+                isVisible = true,
+                actionText = "Swiping back to top..."
             )
-            delay(400)
-            _webNavActions.emit(WebNavAction.ScrollPageBy(0, -960))
-            delay(450)
+            delay(300)
+            _agentCursorState.value = _agentCursorState.value.copy(
+                yRatio = 0.75f,
+                actionText = "Returning to header..."
+            )
+            _webNavActions.emit(WebNavAction.ScrollPageBy(0, -1500))
+            delay(750)
 
             _isAgentRunning.value = false
             _agentStatus.value = AgentModeStatus.COMPLETED

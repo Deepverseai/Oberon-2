@@ -129,7 +129,8 @@ fun WebScreen(
                     }
                 }
                 is WebNavAction.ScrollPageBy -> {
-                    webView.scrollBy(action.dx, action.dy)
+                    val scrollScript = "try { window.scrollBy({ left: ${action.dx}, top: ${action.dy}, behavior: 'smooth' }); } catch(e) { window.scrollBy(${action.dx}, ${action.dy}); }"
+                    webView.evaluateJavascript(scrollScript, null)
                 }
                 is WebNavAction.ExtractReaderContent -> {
                     val extractJs = """
