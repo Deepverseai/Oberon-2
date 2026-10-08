@@ -7,6 +7,9 @@ import com.example.agent.AgentCursorState
 import com.example.agent.AgentDetectedError
 import com.example.agent.AgentModeStatus
 import com.example.agent.InteractiveElementInfo
+import com.example.agent.SemanticButtonElement
+import com.example.agent.SemanticElementMap
+import com.example.agent.SemanticInputElement
 import com.example.data.local.AppDatabase
 import com.example.data.local.BookmarkEntity
 import com.example.data.local.HistoryEntity
@@ -1045,5 +1048,123 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
             clean = clean.substring(1, clean.length - 1).replace("\\n", "\n").replace("\\\"", "\"").replace("\\\\", "\\")
         }
         return clean
+    }
+
+    suspend fun agentExtractSemanticMap(): JSONObject {
+        val script = """
+            (function() {
+                var result = {
+                    url: window.location.href || '',
+                    title: document.title || '',
+                    inputs: [],
+                    buttons: [],
+                    isAtBottom: (window.innerHeight + window.pageYOffset) >= (document.body.offsetHeight - 50)
+                };
+
+                var winW = Math.max(1, window.innerWidth);
+                var winH = Math.max(1, window.innerHeight);
+
+                // 1. Scan Form Inputs
+                var inputEls = document.querySelectorAll('input:not([type="hidden"]):not([type="submit"]):not([type="button"]):not([type="reset"]):not([type="image"]), textarea, select');
+                for (var i = 0; i < inputEls.length; i++) {
+                    var el = inputEls[i];
+                    var rect = el.getBoundingClientRect();
+                    if (rect.width > 5 && rect.height > 5) {
+                        var id = el.id ? '#' + el.id : '';
+                        var name = el.getAttribute('name') || '';
+                        var sel = id || (name ? el.tagName.toLowerCase() + '[name="' + name + '"]' : '') || el.tagName.toLowerCase();
+                        
+                        var labelText = '';
+                        if (el.id) {
+                            var lbl = document.querySelector('label[for="' + el.id + '"]');
+                            if (lbl) labelText = lbl.innerText || lbl.textContent || '';
+                        }
+                        if (!labelText && el.closest('label')) {
+                            labelText = el.closest('label').innerText || el.closest('label').textContent || '';
+                        }
+                        if (!labelText) {
+                            labelText = el.getAttribute('aria-label') || el.getAttribute('placeholder') || el.title || name || '';
+                        }
+                        labelText = labelText.replace(/\s+/g, ' ').trim();
+                        if (labelText.length > 40) labelText = labelText.substring(0, 40) + '...';
+
+                        var ph = (el.getAttribute('placeholder') || '').replace(/\s+/g, ' ').trim();
+                        var inputType = el.getAttribute('type') || (el.tagName.toLowerCase() === 'textarea' ? 'textarea' : (el.tagName.toLowerCase() === 'select' ? 'select' : 'text'));
+
+                        var cx = (rect.left + rect.width / 2) / winW;
+                        var cy = (rect.top + rect.height / 2) / winH;
+
+                        result.inputs.push({
+                            selector: sel,
+                            label: labelText,
+                            placeholder: ph,
+                            type: inputType.toLowerCase(),
+                            name: name,
+                            id: el.id || '',
+                            xRatio: Math.max(0.05, Math.min(0.95, cx)),
+                            yRatio: Math.max(0.05, Math.min(0.95, cy))
+                        });
+                        if (result.inputs.length >= 30) break;
+                    }
+                }
+
+                // 2. Scan Interactive Buttons & Action Triggers
+                var btnEls = document.querySelectorAll('button, input[type="submit"], input[type="button"], [role="button"], a[role="button"]');
+                for (var j = 0; j < btnEls.length; j++) {
+                    var b = btnEls[j];
+                    var bRect = b.getBoundingClientRect();
+                    if (bRect.width > 8 && bRect.height > 8) {
+                        var bId = b.id ? '#' + b.id : '';
+                        var bCls = (b.className && typeof b.className === 'string' && b.className.trim().length > 0) ? '.' + b.className.trim().split(/\s+/)[0] : '';
+                        var bSel = bId || (b.tagName.toLowerCase() + bCls) || b.tagName.toLowerCase();
+                        
+                        var bText = (b.innerText || b.value || b.getAttribute('aria-label') || b.title || '').replace(/\s+/g, ' ').trim();
+                        if (bText.length > 35) bText = bText.substring(0, 35) + '...';
+
+                        var bRole = 'button';
+                        var lowerText = bText.toLowerCase();
+                        if (b.type === 'submit' || lowerText.indexOf('submit') !== -1 || lowerText.indexOf('login') !== -1 || lowerText.indexOf('sign in') !== -1 || lowerText.indexOf('register') !== -1 || lowerText.indexOf('send') !== -1) {
+                            bRole = 'primary_action';
+                        } else if (lowerText.indexOf('cancel') !== -1 || lowerText.indexOf('close') !== -1 || lowerText.indexOf('dismiss') !== -1) {
+                            bRole = 'cancel_action';
+                        }
+
+                        var bx = (bRect.left + bRect.width / 2) / winW;
+                        var by = (bRect.top + bRect.height / 2) / winH;
+
+                        result.buttons.push({
+                            selector: bSel,
+                            text: bText || 'Button',
+                            role: bRole,
+                            xRatio: Math.max(0.05, Math.min(0.95, bx)),
+                            yRatio: Math.max(0.05, Math.min(0.95, by))
+                        });
+                        if (result.buttons.length >= 30) break;
+                    }
+                }
+
+                return JSON.stringify(result);
+            })()
+        """.trimIndent()
+
+        val raw = executeJavaScriptAsync(script)
+        var clean = raw.trim()
+        if (clean.startsWith("\"") && clean.endsWith("\"")) {
+            clean = clean.substring(1, clean.length - 1).replace("\\\"", "\"").replace("\\\\", "\\")
+        }
+        return try {
+            val json = JSONObject(clean)
+            json.put("status", "ok")
+            val inputsCount = json.optJSONArray("inputs")?.length() ?: 0
+            val buttonsCount = json.optJSONArray("buttons")?.length() ?: 0
+            json.put("totalInteractiveElements", inputsCount + buttonsCount)
+            json
+        } catch (e: Exception) {
+            JSONObject()
+                .put("status", "error")
+                .put("message", e.message ?: "Failed to parse semantic element map")
+                .put("inputs", JSONArray())
+                .put("buttons", JSONArray())
+        }
     }
 }

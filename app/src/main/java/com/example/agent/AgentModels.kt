@@ -80,3 +80,63 @@ data class AgentAuditReport(
     val durationSeconds: Float = 0f,
     val passedSuccessfully: Boolean = true
 )
+
+data class SemanticInputElement(
+    val selector: String,
+    val label: String,
+    val placeholder: String,
+    val type: String,
+    val name: String = "",
+    val id: String = "",
+    val xRatio: Float = 0.5f,
+    val yRatio: Float = 0.5f
+) {
+    fun toJsonObject(): org.json.JSONObject = org.json.JSONObject().apply {
+        put("selector", selector)
+        put("label", label)
+        put("placeholder", placeholder)
+        put("type", type)
+        put("name", name)
+        put("id", id)
+        put("xRatio", xRatio.toDouble())
+        put("yRatio", yRatio.toDouble())
+    }
+}
+
+data class SemanticButtonElement(
+    val selector: String,
+    val text: String,
+    val role: String = "button",
+    val xRatio: Float = 0.5f,
+    val yRatio: Float = 0.5f
+) {
+    fun toJsonObject(): org.json.JSONObject = org.json.JSONObject().apply {
+        put("selector", selector)
+        put("text", text)
+        put("role", role)
+        put("xRatio", xRatio.toDouble())
+        put("yRatio", yRatio.toDouble())
+    }
+}
+
+data class SemanticElementMap(
+    val url: String = "",
+    val title: String = "",
+    val inputs: List<SemanticInputElement> = emptyList(),
+    val buttons: List<SemanticButtonElement> = emptyList(),
+    val isAtBottom: Boolean = false
+) {
+    fun toJsonObject(): org.json.JSONObject = org.json.JSONObject().apply {
+        put("status", "ok")
+        put("url", url)
+        put("title", title)
+        val inputsArr = org.json.JSONArray()
+        inputs.forEach { inputsArr.put(it.toJsonObject()) }
+        put("inputs", inputsArr)
+        val buttonsArr = org.json.JSONArray()
+        buttons.forEach { buttonsArr.put(it.toJsonObject()) }
+        put("buttons", buttonsArr)
+        put("isAtBottom", isAtBottom)
+        put("totalInteractiveElements", inputs.size + buttons.size)
+    }
+}

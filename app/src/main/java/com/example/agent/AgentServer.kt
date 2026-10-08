@@ -214,6 +214,12 @@ class AgentServer(
                         .put("errors", errors)
                         .toString()
                 }
+                "extract_map" -> {
+                    val mapJson = runBlocking {
+                        viewModel.agentExtractSemanticMap()
+                    }
+                    mapJson.toString()
+                }
                 else -> JSONObject().put("status", "error").put("message", "Unknown action: $action").toString()
             }
         } catch (e: Exception) {
