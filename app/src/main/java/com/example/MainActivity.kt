@@ -312,6 +312,8 @@ fun BrowserMainScreen(
     val agentErrors by viewModel.agentErrors.collectAsStateWithLifecycle()
     val isAgentRunning by viewModel.isAgentRunning.collectAsStateWithLifecycle()
     val agentButtonsTested by viewModel.agentButtonsTested.collectAsStateWithLifecycle()
+    val activeEngine by viewModel.activeEngine.collectAsStateWithLifecycle()
+    val activeGoal by viewModel.activeGoal.collectAsStateWithLifecycle()
 
     val isBookmarked = remember(activeTab?.url, bookmarks) {
         bookmarks.any { it.url == activeTab?.url }
@@ -423,6 +425,10 @@ fun BrowserMainScreen(
                     agentErrors = agentErrors,
                     isAgentRunning = isAgentRunning,
                     agentButtonsTested = agentButtonsTested,
+                    activeEngine = activeEngine,
+                    activeGoal = activeGoal,
+                    onSwitchEngine = { viewModel.setAgentEngine(it) },
+                    onDispatchOperatorGoal = { viewModel.runAutonomousOperatorGoal(it) },
                     onTabStateChange = { url, title, favicon, isLoading, progress, canGoBack, canGoForward, incrementTrackers ->
                         viewModel.updateTabState(
                             tabId = activeTab.id,

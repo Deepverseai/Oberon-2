@@ -2,13 +2,21 @@ package com.example.agent
 
 import java.util.UUID
 
+enum class AgentEngineType(val displayName: String, val badge: String) {
+    QA_AUDITOR("QA Button Auditor", "AUDIT"),
+    AOA_OPERATOR("Autonomous Operator Agent", "AOA")
+}
+
 enum class AgentModeStatus(val displayName: String) {
     IDLE("Agent Idle"),
     SCANNING("Scanning DOM & Elements"),
     TESTING_BUTTONS("Testing Interactive Elements"),
     SCROLLING("Testing Viewport & Scroll"),
     ERROR_DETECTED("Bug Detected"),
-    COMPLETED("Audit Completed")
+    COMPLETED("Audit Completed"),
+    OPERATOR_THINKING("AOA Thinking..."),
+    OPERATOR_ACTING("AOA Executing Action..."),
+    OPERATOR_VERIFYING("AOA Verifying Step...")
 }
 
 data class AgentCursorState(

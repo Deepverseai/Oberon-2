@@ -220,6 +220,15 @@ class AgentServer(
                     }
                     mapJson.toString()
                 }
+                "operate" -> {
+                    val goal = req.optString("goal", "")
+                    val started = viewModel.runAutonomousOperatorGoal(goal)
+                    if (started) {
+                        JSONObject().put("status", "ok").put("message", "Operator goal initiated").put("goal", goal).toString()
+                    } else {
+                        JSONObject().put("status", "error").put("message", "Agent engine is currently busy").toString()
+                    }
+                }
                 else -> JSONObject().put("status", "error").put("message", "Unknown action: $action").toString()
             }
         } catch (e: Exception) {

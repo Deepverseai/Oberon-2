@@ -14,12 +14,24 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.sp
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -34,6 +46,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.example.agent.AgentCursorState
 import com.example.agent.AgentDetectedError
+import com.example.agent.AgentEngineType
 import com.example.agent.AgentModeStatus
 import com.example.model.BrowserTab
 import com.example.model.UserAgentPreference
@@ -81,6 +94,10 @@ fun WebScreen(
     agentErrors: List<AgentDetectedError>,
     isAgentRunning: Boolean,
     agentButtonsTested: Int,
+    activeEngine: AgentEngineType = AgentEngineType.QA_AUDITOR,
+    activeGoal: String = "",
+    onSwitchEngine: (AgentEngineType) -> Unit = {},
+    onDispatchOperatorGoal: (String) -> Unit = {},
     onTabStateChange: (
         url: String?,
         title: String?,
@@ -358,6 +375,7 @@ fun WebScreen(
             )
         }
 
+
         // --- Antigravity AI Agent Visual Virtual Cursor & HUD ---
         if (isAgentModeEnabled) {
             AgentVirtualCursor(
@@ -369,6 +387,10 @@ fun WebScreen(
                 status = agentStatus,
                 isRunning = isAgentRunning,
                 errorCount = agentErrors.size,
+                activeEngine = activeEngine,
+                activeGoal = activeGoal,
+                onSwitchEngine = onSwitchEngine,
+                onDispatchOperatorGoal = onDispatchOperatorGoal,
                 onRunButtonAudit = onRunButtonAudit,
                 onRunScrollTest = onRunScrollTest,
                 onStopTest = onStopAgentTest,

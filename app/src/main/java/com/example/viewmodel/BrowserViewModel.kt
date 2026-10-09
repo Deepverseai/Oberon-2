@@ -5,6 +5,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.agent.AgentCursorState
 import com.example.agent.AgentDetectedError
+import com.example.agent.AgentEngineType
 import com.example.agent.AgentModeStatus
 import com.example.agent.InteractiveElementInfo
 import com.example.agent.SemanticButtonElement
@@ -179,6 +180,13 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
 
     private val _agentButtonsTested = MutableStateFlow(0)
     val agentButtonsTested: StateFlow<Int> = _agentButtonsTested.asStateFlow()
+
+    private val _activeEngine = MutableStateFlow(AgentEngineType.QA_AUDITOR)
+    val activeEngine: StateFlow<AgentEngineType> = _activeEngine.asStateFlow()
+
+    private val _activeGoal = MutableStateFlow("")
+    val activeGoal: StateFlow<String> = _activeGoal.asStateFlow()
+
 
     private var agentTestJob: Job? = null
 
@@ -672,6 +680,7 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
     fun runAutonomousButtonAudit() {
         if (_isAgentRunning.value) return
         _isAgentRunning.value = true
+        _activeEngine.value = AgentEngineType.QA_AUDITOR
         _agentStatus.value = AgentModeStatus.SCANNING
         _agentButtonsTested.value = 0
 
@@ -896,13 +905,35 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
+    fun setAgentEngine(engine: AgentEngineType) {
+        if (!_isAgentRunning.value) {
+            _activeEngine.value = engine
+        }
+    }
+
+    fun runAutonomousOperatorGoal(goal: String): Boolean {
+        if (_isAgentRunning.value) return false
+        _isAgentRunning.value = true
+        _activeEngine.value = AgentEngineType.AOA_OPERATOR
+        _activeGoal.value = goal
+        _agentStatus.value = AgentModeStatus.OPERATOR_THINKING
+        _agentCursorState.value = AgentCursorState(
+            xRatio = 0.5f,
+            yRatio = 0.5f,
+            isVisible = true,
+            actionText = "AOA Goal: ${goal.take(24)}"
+        )
+        return true
+    }
+
     fun stopAgentTest() {
         agentTestJob?.cancel()
         agentTestJob = null
         _isAgentRunning.value = false
+        _activeGoal.value = ""
         _agentStatus.value = AgentModeStatus.IDLE
         _agentCursorState.value = _agentCursorState.value.copy(
-            actionText = "Agent Test Paused"
+            actionText = "Agent Paused"
         )
     }
 
