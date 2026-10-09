@@ -2,9 +2,9 @@ name: Build and Zip Debug and Release APKs
 
 on:
   push:
-    branches: [ "main", "master" ]
+    branches: [ "main", "master", "testing" ]
   pull_request:
-    branches: [ "main", "master" ]
+    branches: [ "main", "master", "testing" ]
   workflow_dispatch:
 
 jobs:
