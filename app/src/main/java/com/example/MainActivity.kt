@@ -314,6 +314,7 @@ fun BrowserMainScreen(
     val agentButtonsTested by viewModel.agentButtonsTested.collectAsStateWithLifecycle()
     val activeEngine by viewModel.activeEngine.collectAsStateWithLifecycle()
     val activeGoal by viewModel.activeGoal.collectAsStateWithLifecycle()
+    val isPreviewAppFrame by viewModel.isPreviewAppFrame.collectAsStateWithLifecycle()
 
     val isBookmarked = remember(activeTab?.url, bookmarks) {
         bookmarks.any { it.url == activeTab?.url }
@@ -349,7 +350,7 @@ fun BrowserMainScreen(
         modifier = Modifier.fillMaxSize(),
         containerColor = MaterialTheme.colorScheme.background,
         topBar = {
-            if (!isBottomToolbar && activeTab?.isReaderMode != true && !isOmniboxFocused) {
+            if (!isBottomToolbar && activeTab?.isReaderMode != true && !isOmniboxFocused && !isPreviewAppFrame) {
                 ChromeTopBar(
                     tab = activeTab,
                     tabCount = tabs.size,
@@ -427,8 +428,10 @@ fun BrowserMainScreen(
                     agentButtonsTested = agentButtonsTested,
                     activeEngine = activeEngine,
                     activeGoal = activeGoal,
+                    isPreviewAppFrame = isPreviewAppFrame,
                     onSwitchEngine = { viewModel.setAgentEngine(it) },
                     onDispatchOperatorGoal = { viewModel.runAutonomousOperatorGoal(it) },
+                    onTogglePreviewMode = { viewModel.setPreviewMode(it) },
                     onTabStateChange = { url, title, favicon, isLoading, progress, canGoBack, canGoForward, incrementTrackers ->
                         viewModel.updateTabState(
                             tabId = activeTab.id,

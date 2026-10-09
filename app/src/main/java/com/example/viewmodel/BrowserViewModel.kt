@@ -187,6 +187,12 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
     private val _activeGoal = MutableStateFlow("")
     val activeGoal: StateFlow<String> = _activeGoal.asStateFlow()
 
+    private val _isPreviewAppFrame = MutableStateFlow(false)
+    val isPreviewAppFrame: StateFlow<Boolean> = _isPreviewAppFrame.asStateFlow()
+
+    fun setPreviewMode(isApp: Boolean) {
+        _isPreviewAppFrame.value = isApp
+    }
 
     private var agentTestJob: Job? = null
 

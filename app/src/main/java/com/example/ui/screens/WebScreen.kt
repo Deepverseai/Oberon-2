@@ -96,8 +96,10 @@ fun WebScreen(
     agentButtonsTested: Int,
     activeEngine: AgentEngineType = AgentEngineType.QA_AUDITOR,
     activeGoal: String = "",
+    isPreviewAppFrame: Boolean = false,
     onSwitchEngine: (AgentEngineType) -> Unit = {},
     onDispatchOperatorGoal: (String) -> Unit = {},
+    onTogglePreviewMode: (Boolean) -> Unit = {},
     onTabStateChange: (
         url: String?,
         title: String?,
@@ -184,9 +186,31 @@ fun WebScreen(
         }
     }
 
-    Box(modifier = modifier.fillMaxSize()) {
-        AndroidView(
-            modifier = Modifier.fillMaxSize(),
+    Box(
+        modifier = modifier
+            .fillMaxSize()
+            .then(
+                if (isPreviewAppFrame) Modifier.background(Color(0xFF0F172A)) else Modifier
+            ),
+        contentAlignment = if (isPreviewAppFrame) Alignment.Center else Alignment.TopStart
+    ) {
+        val webContentModifier = if (isPreviewAppFrame) {
+            Modifier
+                .widthIn(max = 412.dp)
+                .fillMaxHeight(0.96f)
+                .padding(vertical = 10.dp)
+                .clip(RoundedCornerShape(26.dp))
+                .border(2.dp, Color(0xFF334155), RoundedCornerShape(26.dp))
+        } else {
+            Modifier.fillMaxSize()
+        }
+
+        Box(
+            modifier = webContentModifier,
+            contentAlignment = Alignment.TopCenter
+        ) {
+            AndroidView(
+                modifier = Modifier.fillMaxSize(),
             factory = { ctx ->
                 WebView(ctx).apply {
                     webViewInstance = this
@@ -374,7 +398,28 @@ fun WebScreen(
                 trackColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
             )
         }
+    }
 
+    if (isPreviewAppFrame) {
+        Row(
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .padding(top = 16.dp)
+                .clip(RoundedCornerShape(14.dp))
+                .background(Color(0xFF1E293B).copy(alpha = 0.92f))
+                .border(0.8.dp, Color(0xFF475569), RoundedCornerShape(14.dp))
+                .clickable { onTogglePreviewMode(false) }
+                .padding(horizontal = 10.dp, vertical = 5.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "📱 App Frame (390×844) • Tap for Web",
+                fontSize = 11.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = Color(0xFFF8FAFC)
+            )
+        }
+    }
 
         // --- Antigravity AI Agent Visual Virtual Cursor & HUD ---
         if (isAgentModeEnabled) {

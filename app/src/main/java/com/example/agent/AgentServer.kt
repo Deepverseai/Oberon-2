@@ -192,10 +192,11 @@ class AgentServer(
                 }
                 "set_preview_mode" -> {
                     val mode = req.optString("mode", "website")
+                    val isApp = mode.equals("app", ignoreCase = true)
                     scope.launch(Dispatchers.Main) {
-                        viewModel.toggleAgentMode(mode.equals("app", ignoreCase = true))
+                        viewModel.setPreviewMode(isApp)
                     }
-                    JSONObject().put("status", "ok").put("mode", mode).toString()
+                    JSONObject().put("status", "ok").put("mode", mode).put("isAppPreview", isApp).toString()
                 }
                 "audit" -> {
                     scope.launch(Dispatchers.Main) {
